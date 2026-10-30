@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
+import '../services/notificacoes.dart';
 import '../theme/periodo.dart';
 import 'config_screen.dart';
 
@@ -20,10 +21,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    Notificacoes.iniciar();
     carregar();
-    // reavalia o tema (manhã/tarde/noite) a cada minuto
-    timer = Timer.periodic(const Duration(minutes: 1),
-        (_) => setState(() => periodo = Periodo.agora()));
+    // reavalia o tema e confere novos alertas a cada minuto
+    timer = Timer.periodic(const Duration(minutes: 1), (_) {
+      setState(() => periodo = Periodo.agora());
+      if (uid != null) Notificacoes.verificar(uid!);
+    });
   }
 
   @override
@@ -38,6 +42,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final d = await Api.previsao(uid!);
       setState(() { dados = d; erro = null; });
+      await Notificacoes.verificar(uid!);
     } catch (e) {
       setState(() => erro = 'Sem conexão com o servidor.');
     }
@@ -51,18 +56,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> abrirAlertas() async {
     await Api.testar(uid!); // gera um envio de teste
+    await Notificacoes.verificar(uid!);
     final lista = await Api.alertas(uid!);
     if (!mounted) return;
     showModalBottomSheet(
         context: context,
         builder: (_) => ListView(children: [
-              for (final a in lista)
-                ListTile(
-                    leading: Icon(a['tipo'] == 'geada' ? Icons.ac_unit
-                        : a['tipo'] == 'chuva' ? Icons.thunderstorm : Icons.wb_sunny),
-                    title: Text(a['mensagem']),
-                    subtitle: Text(a['enviado_em'])),
-            ]));
+          for (final a in lista)
+            ListTile(
+                leading: Icon(a['tipo'] == 'geada' ? Icons.ac_unit
+                    : a['tipo'] == 'chuva' ? Icons.thunderstorm : Icons.wb_sunny),
+                title: Text(a['mensagem']),
+                subtitle: Text(a['enviado_em'])),
+        ]));
   }
 
   static IconData icone(int c) {
@@ -93,8 +99,8 @@ class _HomeScreenState extends State<HomeScreen> {
           child: erro != null
               ? Center(child: Text(erro!))
               : d == null
-                  ? const Center(child: CircularProgressIndicator())
-                  : RefreshIndicator(onRefresh: carregar, child: corpo(d)),
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(onRefresh: carregar, child: corpo(d)),
         ),
       ),
     );
