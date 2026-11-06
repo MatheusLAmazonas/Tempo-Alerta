@@ -139,7 +139,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> abrirAlertas() async {
-    await Api.testar(uid!); // gera um envio de teste
     await Notificacoes.verificar(uid!);
     final lista = await Api.alertas(uid!);
     if (!mounted) return;

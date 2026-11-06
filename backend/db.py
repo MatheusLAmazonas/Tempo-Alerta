@@ -25,12 +25,19 @@ def init():
             horario TEXT NOT NULL,
             alerta_chuva INTEGER DEFAULT 1,
             alerta_geada INTEGER DEFAULT 1);
+        CREATE TABLE IF NOT EXISTS usuario_cidades(
+            usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+            cidade_id INTEGER NOT NULL REFERENCES cidades(id),
+            PRIMARY KEY(usuario_id, cidade_id));
         CREATE TABLE IF NOT EXISTS alertas_enviados(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
-            tipo TEXT NOT NULL,          -- diaria | chuva | geada
+            tipo TEXT NOT NULL,
             mensagem TEXT NOT NULL,
-            ref_data TEXT NOT NULL,      -- dia da previsão (evita duplicar)
+            ref_data TEXT NOT NULL,
             enviado_em TEXT DEFAULT (datetime('now','localtime')),
             UNIQUE(usuario_id, tipo, ref_data));
+        -- migração: quem já tinha cidade cadastrada passa a tê-la na lista
+        INSERT OR IGNORE INTO usuario_cidades(usuario_id, cidade_id)
+            SELECT usuario_id, cidade_id FROM preferencias;
         """)

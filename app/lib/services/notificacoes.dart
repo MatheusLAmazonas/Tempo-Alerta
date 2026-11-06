@@ -5,30 +5,38 @@ import 'api.dart';
 class Notificacoes {
   static final _plugin = FlutterLocalNotificationsPlugin();
 
-  static Future<void> iniciar() async {
+  static Future<void> iniciar({bool pedirPermissao = true}) async {
     await _plugin.initialize(const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher')));
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+    if (pedirPermissao) {
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+    }
   }
 
   /// Mostra na barra os alertas que ainda não foram notificados.
   static Future<void> verificar(int uid) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.reload(); // necessário quando roda em segundo plano
       final lista = await Api.alertas(uid); // mais novo primeiro
       final ultimo = prefs.getInt('ultimo_alerta');
       final maior = lista.isEmpty ? 0 : lista.first['id'] as int;
       if (ultimo != null) {
         for (final a in lista.reversed.where((a) => (a['id'] as int) > ultimo)) {
+          final diaria = a['tipo'] == 'diaria';
           await _plugin.show(
-              a['id'] as int, 'TempoAlerta', a['mensagem'],
-              const NotificationDetails(
+              a['id'] as int,
+              diaria ? 'TempoAlerta' : '⚠️ Alerta do tempo',
+              a['mensagem'],
+              NotificationDetails(
                   android: AndroidNotificationDetails(
-                      'tempoalerta', 'Alertas do tempo',
-                      importance: Importance.high, priority: Priority.high)));
+                      diaria ? 'previsao_diaria' : 'alertas_graves',
+                      diaria ? 'Previsão diária' : 'Alertas importantes',
+                      importance: diaria ? Importance.defaultImportance : Importance.max,
+                      priority: diaria ? Priority.defaultPriority : Priority.high)));
         }
       }
       await prefs.setInt('ultimo_alerta', maior);
