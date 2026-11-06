@@ -13,6 +13,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? dados;
+  List<dynamic> cidades = [];
+  int indice = 0;
   String? erro;
   int? uid;
   Periodo periodo = Periodo.agora();
@@ -36,15 +38,23 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  void aviso(String t) => ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text(t)));
+
+  String msg(Object e) => e.toString().replaceFirst('Exception: ', '');
+
   Future<void> carregar() async {
     uid = await Api.usuarioId();
     if (uid == null) return abrirConfig();
     try {
-      final d = await Api.previsao(uid!);
+      cidades = await Api.cidades(uid!);
+      if (indice >= cidades.length) indice = 0;
+      final d = await Api.previsao(uid!, cidadeId: cidades[indice]['id'] as int);
+      if (!mounted) return;
       setState(() { dados = d; erro = null; });
       await Notificacoes.verificar(uid!);
     } catch (e) {
-      setState(() => erro = 'Sem conexão com o servidor.');
+      if (mounted) setState(() => erro = 'Sem conexão com o servidor.');
     }
   }
 
@@ -52,6 +62,80 @@ class _HomeScreenState extends State<HomeScreen> {
     final ok = await Navigator.push(
         context, MaterialPageRoute(builder: (_) => const ConfigScreen()));
     if (ok == true) carregar();
+  }
+
+  Future<void> trocar(int delta) async {
+    if (cidades.length < 2) return;
+    setState(() {
+      indice = (indice + delta + cidades.length) % cidades.length;
+      dados = null;
+    });
+    carregar();
+  }
+
+  Future<void> adicionarCidade() async {
+    final ctrl = TextEditingController();
+    final nome = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Adicionar cidade'),
+          content: TextField(
+              controller: ctrl,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Nome da cidade')),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('Adicionar')),
+          ],
+        ));
+    if (nome == null || nome.isEmpty || uid == null) return;
+    try {
+      await Api.adicionarCidade(uid!, nome);
+      final lista = await Api.cidades(uid!);
+      if (!mounted) return;
+      setState(() {
+        cidades = lista;
+        indice = lista.length - 1; // vai direto para a cidade nova
+        dados = null;
+      });
+      carregar();
+    } catch (e) {
+      if (mounted) aviso(msg(e));
+    }
+  }
+
+  Future<void> removerCidadeAtual() async {
+    if (cidades.length < 2) {
+      aviso('Mantenha ao menos uma cidade.');
+      return;
+    }
+    final c = cidades[indice];
+    final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Remover ${c['nome']}?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Remover')),
+          ],
+        ));
+    if (ok != true || uid == null) return;
+    try {
+      await Api.removerCidade(uid!, c['id'] as int);
+      if (!mounted) return;
+      setState(() { indice = 0; dados = null; });
+      carregar();
+    } catch (e) {
+      if (mounted) aviso(msg(e));
+    }
   }
 
   Future<void> abrirAlertas() async {
@@ -97,7 +181,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 colors: periodo.gradiente)),
         child: SafeArea(
           child: erro != null
-              ? Center(child: Text(erro!))
+              ? Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Text(erro!),
+                const SizedBox(height: 12),
+                FilledButton(
+                    onPressed: () {
+                      setState(() => erro = null);
+                      carregar();
+                    },
+                    child: const Text('Tentar de novo')),
+              ]))
               : d == null
               ? const Center(child: CircularProgressIndicator())
               : RefreshIndicator(onRefresh: carregar, child: corpo(d)),
@@ -108,13 +202,36 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget corpo(Map<String, dynamic> d) {
     final hoje = d['dias'][0];
+    final varias = cidades.length > 1;
     return ListView(padding: const EdgeInsets.all(16), children: [
       Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+        IconButton(icon: const Icon(Icons.settings), onPressed: abrirConfig),
         IconButton(icon: const Icon(Icons.notifications_none), onPressed: abrirAlertas),
-        IconButton(icon: const Icon(Icons.add), onPressed: abrirConfig),
+        IconButton(icon: const Icon(Icons.add_location_alt_outlined), onPressed: adicionarCidade),
       ]),
-      const SizedBox(height: 40),
-      Center(child: Text(d['cidade'], style: const TextStyle(fontSize: 38))),
+      const SizedBox(height: 32),
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        if (varias)
+          IconButton(
+              icon: const Icon(Icons.chevron_left, size: 36),
+              onPressed: () => trocar(-1)),
+        Flexible(
+          child: GestureDetector(
+            onLongPress: removerCidadeAtual, // segurar o nome remove a cidade
+            child: Text(d['cidade'],
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 34)),
+          ),
+        ),
+        if (varias)
+          IconButton(
+              icon: const Icon(Icons.chevron_right, size: 36),
+              onPressed: () => trocar(1)),
+      ]),
+      if (varias)
+        Center(
+            child: Text('${indice + 1} / ${cidades.length}',
+                style: const TextStyle(fontSize: 12))),
       Center(child: Text(umidade(d['atual']['umidade']), style: const TextStyle(fontSize: 20))),
       Center(child: Text('${d['atual']['temp'].round()}° C',
           style: const TextStyle(fontSize: 64, fontWeight: FontWeight.w200))),
